@@ -1,0 +1,12 @@
+{
+  "name": "watch-party",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm --prefix server run dev\" \"npm --prefix web run dev\"",
+    "lint": "npm --prefix server run lint && npm --prefix web run lint",
+    "test": "npm --prefix server test",
+    "build": "npm --prefix server run build && npm --prefix web run build",
+    "install:all": "npm install && npm --prefix server install && npm --prefix web install"
+  },
+  "devDependencies": { "concurrently": "^9.1.2" }
+}
