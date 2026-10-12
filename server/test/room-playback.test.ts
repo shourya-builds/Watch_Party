@@ -194,7 +194,39 @@ test("host-authorized playback, late-join state, ordered commands, and room capa
   guest.emit("room:leave");
   assert.equal((await hostReassigned).participants.find(person => person.id === host.id)?.isHost, true);
 
-  for (let index = 0; index < 8; index += 1) {
+  const openFilmCatalog = await fetch(`${serverUrl}/api/open-films`);
+  const catalog = await openFilmCatalog.json() as { films: Array<{ id: string; videoUrl: string; license: string }> };
+  assert.equal(catalog.films[0]?.id, "big-buck-bunny");
+  assert.match(catalog.films[0]?.videoUrl || "", /^https:\/\//);
+  assert.match(catalog.films[0]?.license || "", /CC BY 3\.0/);
+
+  const invalidOpenFilm = event<{ message: string }>(host, "open-film:error");
+  host.emit("open-film:select", { filmId: "not-in-catalog" });
+  assert.match((await invalidOpenFilm).message, /approved open-film catalog/);
+
+  const openFilmDeniedForGuest = event<{ message: string }>(lateGuest, "open-film:error");
+  lateGuest.emit("open-film:select", { filmId: "big-buck-bunny" });
+  assert.match((await openFilmDeniedForGuest).message, /Only the current host/);
+
+  const filmSelectedByHost = event<{ id: string; videoUrl: string }>(host, "open-film:selected");
+  const filmSelectedByGuest = event<{ id: string; videoUrl: string }>(lateGuest, "open-film:selected");
+  const roomWithFilm = event<{ selectedOpenFilm: { id: string } | null }>(host, "room:state");
+  const playbackResetByFilm = event<{ playing: boolean; position: number; sequence: number }>(host, "playback:state");
+  host.emit("open-film:select", { filmId: "big-buck-bunny" });
+  assert.equal((await filmSelectedByHost).id, "big-buck-bunny");
+  assert.equal((await filmSelectedByGuest).id, "big-buck-bunny");
+  assert.equal((await roomWithFilm).selectedOpenFilm?.id, "big-buck-bunny");
+  const pausedAtNewFilm = await playbackResetByFilm;
+  assert.equal(pausedAtNewFilm.playing, false);
+  assert.equal(pausedAtNewFilm.position, 0);
+  assert.equal(pausedAtNewFilm.sequence, 5);
+
+  const lateFilmViewer = await connectClient();
+  const lateFilmViewerJoined = event<{ selectedOpenFilm: { id: string } | null }>(lateFilmViewer, "room:joined");
+  lateFilmViewer.emit("room:join", { name: "Film Viewer", code: room.code });
+  assert.equal((await lateFilmViewerJoined).selectedOpenFilm?.id, "big-buck-bunny");
+
+  for (let index = 0; index < 7; index += 1) {
     const member = await connectClient();
     const joined = event<{ code: string }>(member, "room:joined");
     member.emit("room:join", { name: `Member ${index + 1}`, code: room.code });

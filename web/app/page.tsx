@@ -6,7 +6,8 @@ import Image from "next/image";
 import MovieDiscovery, { type MovieDetails } from "./components/MovieDiscovery";
 
 type Person = { id: string; name: string; isHost: boolean; connected: boolean };
-type Room = { code: string; participants: Person[]; limit: number; selectedMovie: MovieDetails | null };
+type OpenFilm = { id: string; title: string; year: number; videoUrl: string; attribution: string; license: string; licenseUrl: string; sourceUrl: string };
+type Room = { code: string; participants: Person[]; limit: number; selectedMovie: MovieDetails | null; selectedOpenFilm: OpenFilm | null };
 type Playback = { playing: boolean; position: number; serverTimestamp: number; sequence: number; receivedAt: number; restarted?: boolean };
 
 const API = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:4000";
@@ -36,6 +37,8 @@ export default function Home() {
   const [playbackCommandPending, setPlaybackCommandPending] = useState(false);
   const [movieDiscoveryOpen, setMovieDiscoveryOpen] = useState(false);
   const [movieSelectionError, setMovieSelectionError] = useState("");
+  const [openFilms, setOpenFilms] = useState<OpenFilm[]>([]);
+  const [openFilmError, setOpenFilmError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
@@ -67,6 +70,11 @@ export default function Home() {
     const inviteCode = new URLSearchParams(window.location.search).get("room");
     if (inviteCode) setCode(inviteCode.toUpperCase().slice(0, 6));
     const s = io(API, { autoConnect: true, reconnection: true });
+    fetch(`${API}/api/open-films`).then(async response => {
+      if (!response.ok) throw new Error("Could not load the open-film catalog.");
+      const payload = await response.json() as { films?: OpenFilm[] };
+      setOpenFilms(Array.isArray(payload.films) ? payload.films : []);
+    }).catch(() => setOpenFilmError("Open films could not be loaded. Check the Watch Party server connection."));
     s.on("connect", () => {
       setConnected(true);
       if (hadDisconnectRef.current) {
@@ -103,6 +111,8 @@ export default function Home() {
       setMovieSelectionError("");
     });
     s.on("movie:error", (event: { message: string }) => setMovieSelectionError(event.message));
+    s.on("open-film:error", (event: { message: string }) => setOpenFilmError(event.message));
+    s.on("open-film:selected", () => setOpenFilmError(""));
     setSocket(s);
     return () => { s.disconnect(); };
   }, []);
@@ -120,6 +130,12 @@ export default function Home() {
     }
     setMovieSelectionError("");
     socket?.emit("movie:select", { movieId });
+  }
+
+  function selectOpenFilm(filmId: string) {
+    if (!isHost || !connected) return;
+    setOpenFilmError("");
+    socket?.emit("open-film:select", { filmId });
   }
 
   const applyAuthoritativePlayback = useCallback(async () => {
@@ -295,10 +311,10 @@ export default function Home() {
 
         <div className="grid items-start gap-5 lg:min-h-0 lg:flex-1 lg:items-stretch lg:grid-cols-[minmax(0,1fr)_310px] lg:grid-rows-1">
           <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl shadow-black/30 lg:flex lg:min-h-0 lg:flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5"><div><h2 className="font-semibold">{MOVIE_TITLE} · demo video</h2><a className="text-xs text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-cyan-300" href={ATTRIBUTION_URL} target="_blank" rel="noreferrer">MDN sample video · CC0 1.0</a></div><span className="text-xs text-slate-500">{playback?.playing ? "Playing" : "Paused"}{playback ? ` · sync #${playback.sequence}` : ""}</span></div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5"><div><h2 className="font-semibold">{room.selectedOpenFilm ? room.selectedOpenFilm.title : `${MOVIE_TITLE} · demo video`}</h2><a className="text-xs text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-cyan-300" href={room.selectedOpenFilm?.sourceUrl || ATTRIBUTION_URL} target="_blank" rel="noreferrer">{room.selectedOpenFilm ? `${room.selectedOpenFilm.attribution} · ${room.selectedOpenFilm.license}` : "MDN sample video · CC0 1.0"}</a></div><span className="text-xs text-slate-500">{playback?.playing ? "Playing" : "Paused"}{playback ? ` · sync #${playback.sequence}` : ""}</span></div>
 
             <div className="relative aspect-video bg-black lg:min-h-0 lg:flex-1 lg:aspect-auto">
-              <video ref={videoRef} src={VIDEO_URL} preload="metadata" playsInline className="h-full w-full object-contain" onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setMediaReady(true); setMediaError(""); }} onCanPlay={() => { setMediaReady(true); setMediaError(""); }} onWaiting={() => setMediaReady(false)} onPlaying={() => setMediaReady(true)} onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded} onError={() => { setMediaReady(false); setMediaError("The sample video could not be loaded. Check your connection or set NEXT_PUBLIC_SAMPLE_VIDEO_URL to a reachable MP4 or WebM file."); }} />
+              <video ref={videoRef} src={room.selectedOpenFilm?.videoUrl || VIDEO_URL} preload="metadata" playsInline className="h-full w-full object-contain" onLoadStart={() => { setMediaReady(false); setMediaError(""); }} onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setMediaReady(true); setMediaError(""); }} onCanPlay={() => { setMediaReady(true); setMediaError(""); }} onWaiting={() => setMediaReady(false)} onPlaying={() => setMediaReady(true)} onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded} onError={() => { setMediaReady(false); setMediaError("This video could not be loaded. Check your connection or try the demo video again."); }} />
               {!mediaReady && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/55"><div className="flex items-center gap-3 text-sm text-slate-200"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-cyan-300" />Loading video…</div></div>}
               {mediaError && <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-center"><p role="alert" className="max-w-lg text-sm text-rose-200">{mediaError}</p><button type="button" onClick={retryVideo} className="rounded-lg border border-cyan-400 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/10">Retry video</button></div>}
               {needsPlaybackGesture && playback?.playing && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/55"><button onClick={() => { const video = videoRef.current; if (video) void video.play().then(() => setNeedsPlaybackGesture(false)).catch(() => setMediaError("Your browser blocked playback. Check the video source or browser media settings.")); }} className="rounded-xl bg-cyan-400 px-5 py-3 font-semibold text-slate-950">Enable synced playback</button></div>}
@@ -320,6 +336,13 @@ export default function Home() {
               <p className="mt-3 text-[11px] leading-relaxed text-slate-500">Movie information and posters do not include a playable stream. The demo video remains separate and unchanged.</p>
               <button type="button" onClick={() => { setMovieSelectionError(""); setMovieDiscoveryOpen(true); }} className="mt-3 w-full rounded-lg border border-cyan-700 px-3 py-2 text-sm font-semibold text-cyan-200 hover:border-cyan-400 hover:bg-cyan-950/40">Discover movies</button>
               {movieSelectionError && !movieDiscoveryOpen && <p role="alert" className="mt-2 text-xs text-rose-300">{movieSelectionError}</p>}
+            </section>
+            <section className="mb-5 rounded-xl border border-emerald-900/70 bg-emerald-950/20 p-3">
+              <h2 className="text-sm font-semibold">Open-license films</h2>
+              <p className="mt-1 text-xs leading-relaxed text-slate-400">These are playable film files, separate from TMDB movie metadata. The host chooses the room video.</p>
+              <div className="mt-3 space-y-2">{openFilms.map(film => <div key={film.id} className="rounded-lg bg-slate-950/70 p-2.5"><p className="text-sm font-medium">{film.title} ({film.year})</p><p className="mt-1 text-[11px] text-slate-500">{film.attribution} · {film.license}</p><button type="button" disabled={!isHost || !connected || room.selectedOpenFilm?.id === film.id} onClick={() => selectOpenFilm(film.id)} className="mt-2 w-full rounded-md border border-emerald-700 px-2 py-1.5 text-xs font-semibold text-emerald-200 hover:border-emerald-400 disabled:opacity-50">{room.selectedOpenFilm?.id === film.id ? "Playing this room's selection" : !isHost ? "Only the host can choose" : "Play in this room"}</button><a href={film.licenseUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[11px] text-cyan-300 underline">License details</a></div>)}{openFilms.length === 0 && !openFilmError && <p className="text-xs text-slate-500">Loading film catalog…</p>}</div>
+              {room.selectedOpenFilm && <button type="button" disabled={!isHost || !connected} onClick={() => selectOpenFilm("demo-sample")} className="mt-3 w-full rounded-md border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-50">Return to demo video</button>}
+              {openFilmError && <p role="alert" className="mt-2 text-xs text-rose-300">{openFilmError}</p>}
             </section>
             <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold">Participants</h2><span className="text-sm text-slate-400">{room.participants.length}/{room.limit}</span></div>
             <ul className="space-y-2">{room.participants.map(person => <li key={person.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/80 px-3 py-3"><span className="min-w-0 truncate text-sm">{person.name}{person.id === socket?.id && <span className="text-slate-400"> (you)</span>}{!person.connected && <span className="ml-1 text-xs text-amber-300">reconnecting</span>}</span><span className="shrink-0 text-xs">{person.isHost ? <span className="text-amber-300">Host</span> : isHost && person.connected ? <button className="text-cyan-300 hover:underline" onClick={() => { setError(""); socket?.emit("room:transfer-host", person.id); }}>Make host</button> : null}</span></li>)}</ul>

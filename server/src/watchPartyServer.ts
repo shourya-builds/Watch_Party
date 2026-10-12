@@ -6,6 +6,7 @@ import { z } from "zod";
 import { MovieServiceError, normalizeMovieDetails, tmdbMovieService, type MovieService } from "./movieService";
 import { applyPlaybackCommand, playbackSnapshot } from "./playbackState";
 import { addParticipant, createRoom, getRoom, normalizeCode, publicRoom, removeParticipant } from "./roomStore";
+import { getOpenFilm, OPEN_FILMS } from "./openFilms";
 
 const searchMoviesSchema = z.object({
   query: z.string().trim().max(100).optional().default(""),
@@ -27,6 +28,7 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
   const allowedOrigin = process.env.WEB_ORIGIN || "http://localhost:3000";
   app.use(cors({ origin: allowedOrigin }));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "watch-party-server" }));
+  app.get("/api/open-films", (_req, res) => res.json({ films: OPEN_FILMS }));
   app.get("/api/movies/genres", async (_req, res) => {
     try { res.json({ genres: await movieService.getGenres() }); }
     catch (error) { sendMovieApiError(res, error); }
@@ -187,6 +189,29 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
           else socket.emit("movie:error", { message: "Could not select that movie. Please try again." });
         }
       }
+    });
+    socket.on("open-film:select", raw => {
+      const code = socket.data.roomCode as string | undefined;
+      const room = code && getRoom(code);
+      const payload = z.object({ filmId: z.string().min(1).max(80) }).strict().safeParse(raw);
+      if (!payload.success) {
+        socket.emit("open-film:error", { message: "That open-film selection is invalid." });
+        return;
+      }
+      if (!room || !room.participants.has(socket.id) || room.hostId !== socket.id) {
+        socket.emit("open-film:error", { message: "Only the current host can change the room's playable film." });
+        return;
+      }
+      const film = payload.data.filmId === "demo-sample" ? null : getOpenFilm(payload.data.filmId);
+      if (!film && payload.data.filmId !== "demo-sample") {
+        socket.emit("open-film:error", { message: "That film is not in the approved open-film catalog." });
+        return;
+      }
+      room.selectedOpenFilm = film ?? null;
+      room.playback = { playing: false, position: 0, serverTimestamp: Date.now(), sequence: room.playback.sequence + 1 };
+      io.to(code).emit("open-film:selected", film ?? null);
+      emitRoom(code);
+      emitPlayback(code);
     });
     socket.on("room:leave", () => leaveCurrentRoom(socket));
     socket.on("disconnect", () => {

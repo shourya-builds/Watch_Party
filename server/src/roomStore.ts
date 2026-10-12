@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import type { MovieDetails } from "./movieService";
+import type { OpenFilm } from "./openFilms";
 
 export type Participant = { id: string; name: string; isHost: boolean; connected: boolean };
 export type PlaybackState = { playing: boolean; position: number; serverTimestamp: number; sequence: number };
-export type Room = { code: string; hostId: string; participants: Map<string, Participant>; createdAt: number; playback: PlaybackState; selectedMovie: MovieDetails | null; movieSelectionVersion: number };
+export type Room = { code: string; hostId: string; participants: Map<string, Participant>; createdAt: number; playback: PlaybackState; selectedMovie: MovieDetails | null; selectedOpenFilm: OpenFilm | null; movieSelectionVersion: number };
 
 const rooms = new Map<string, Room>();
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -14,13 +15,13 @@ export function createRoom(id: string, name: string): { room: Room; participant:
   do { code = Array.from(randomBytes(6), byte => alphabet[byte % alphabet.length]).join(""); } while (rooms.has(code));
   const participant = { id, name, isHost: true, connected: true };
   const now = Date.now();
-  const room = { code, hostId: id, participants: new Map([[id, participant]]), createdAt: now, playback: { playing: false, position: 0, serverTimestamp: now, sequence: 0 }, selectedMovie: null, movieSelectionVersion: 0 };
+  const room = { code, hostId: id, participants: new Map([[id, participant]]), createdAt: now, playback: { playing: false, position: 0, serverTimestamp: now, sequence: 0 }, selectedMovie: null, selectedOpenFilm: null, movieSelectionVersion: 0 };
   rooms.set(code, room);
   return { room, participant };
 }
 export function getRoom(code: string) { return rooms.get(normalizeCode(code)); }
 export function deleteRoomIfEmpty(code: string) { const room = getRoom(code); if (room && room.participants.size === 0) rooms.delete(room.code); }
-export function publicRoom(room: Room) { return { code: room.code, participants: [...room.participants.values()], limit: 10, selectedMovie: room.selectedMovie }; }
+export function publicRoom(room: Room) { return { code: room.code, participants: [...room.participants.values()], limit: 10, selectedMovie: room.selectedMovie, selectedOpenFilm: room.selectedOpenFilm }; }
 export function removeParticipant(room: Room, id: string) {
   const wasHost = room.hostId === id;
   room.participants.delete(id);

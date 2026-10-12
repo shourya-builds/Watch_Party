@@ -15,6 +15,12 @@ Room features include six-character room codes, invite URLs (`?room=ABC123`), di
 
 The room page includes a responsive HTML5 video player, host-only play/pause/seek, ordered authoritative playback snapshots, late-join synchronization, drift correction, and Socket.IO connection-state recovery. For local development it uses `web/public/samples/flower.mp4`, a small sample from MDN's interactive examples, released under CC0 1.0 (public domain dedication): https://github.com/mdn/interactive-examples.
 
+### Playing an openly licensed film
+
+The room sidebar also includes **Open-license films**. The initial catalog contains *Big Buck Bunny* (2008), streamed directly from Internet Archive rather than bundled or rehosted by this project. Its item lists the **Attribution 3.0 United States** license; the film's attribution is shown next to the player and the license link is available in the sidebar. The app retains its attribution and license link. Only the host can switch the room's playable source; selecting a source resets everyone to 0:00, paused, and the usual Socket.IO playback sync applies afterward. New/reconnected participants receive the current source with room state. Internet Archive availability and bandwidth are external dependencies; the local flower clip remains the fallback until the host selects a catalog film.
+
+This catalog is deliberately allowlisted by the backend. It is not a mechanism for loading arbitrary movie URLs or bypassing a streaming service's access controls. Add only works whose licenses permit the intended use, and provide their required attribution. See the [Big Buck Bunny Internet Archive record](https://archive.org/details/BigBuckBunny_328) and its [CC BY 3.0 license](https://creativecommons.org/licenses/by/3.0/).
+
 The sample video is bundled locally and served by Next.js, so the default does not rely on an external media host. The frontend reads `NEXT_PUBLIC_SAMPLE_VIDEO_URL` from `web/.env.local` (see `web/.env.example`); set it to a direct MP4/WebM URL if desired. Because `NEXT_PUBLIC_*` values are embedded into frontend code, restart the frontend after changing this setting (and rebuild before production deployment). Playback synchronization is designed for direct media URLs controlled by the browser's HTML5 video element. Third-party embeds such as YouTube need a separate provider-specific API integration and may impose playback or access restrictions.
 
 Room and playback state are in memory. Restarting the server clears rooms; reconnect recovery is limited to brief network interruptions (15 seconds) while the server process remains running.
@@ -37,7 +43,7 @@ The room sidebar's **Discover movies** button opens a searchable TMDB catalog wi
 
 3. Open a room and choose **Discover movies**. If the key is absent or rejected, the discovery view shows a setup/API error while the room and synchronized sample player remain usable.
 
-The key is read from the server process environment; the app does not load a `server/.env` file. The room's selected movie is metadata only. TMDB provides title, synopsis, genres, ratings, and poster art here—not a playable stream—so selecting a movie never changes the HTML5 demo video source. The current sample continues to play and synchronize as before.
+The key is read from the server process environment; the app does not load a `server/.env` file. TMDB selection remains metadata only: TMDB provides title, synopsis, genres, ratings, and poster art here—not a playable stream. To play an actual title within this app, the host can select a licensed source from **Open-license films**; this is separate from TMDB metadata and does not change the selected TMDB movie.
 
 The discovery screen includes the TMDB logo and required notice: “This product uses the TMDB API but is not endorsed or certified by TMDB.” See TMDB's [authentication guidance](https://developer.themoviedb.org/docs/authentication-application), [movie discovery API](https://developer.themoviedb.org/reference/discover-movie), [image URL guidance](https://developer.themoviedb.org/docs/image-basics), and [attribution requirements](https://developer.themoviedb.org/docs/faq). This project uses TMDB's API and imagery under its applicable terms; verify those terms for your own deployment and use.
 
