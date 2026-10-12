@@ -3,7 +3,7 @@ import express from "express";
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import { z } from "zod";
-import { MovieServiceError, tmdbMovieService, type MovieService } from "./movieService";
+import { MovieServiceError, normalizeMovieDetails, tmdbMovieService, type MovieService } from "./movieService";
 import { applyPlaybackCommand, playbackSnapshot } from "./playbackState";
 import { addParticipant, createRoom, getRoom, normalizeCode, publicRoom, removeParticipant } from "./roomStore";
 
@@ -40,7 +40,7 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
   app.get("/api/movies/:id", async (req, res) => {
     const parsed = z.string().regex(/^[1-9]\d{0,8}$/).transform(Number).safeParse(req.params.id);
     if (!parsed.success) return res.status(400).json({ error: "That movie ID is invalid." });
-    try { res.json(await movieService.getDetails(parsed.data)); }
+    try { res.json(normalizeMovieDetails(await movieService.getDetails(parsed.data))); }
     catch (error) { sendMovieApiError(res, error); }
   });
 
@@ -171,7 +171,7 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
 
       const version = ++room.movieSelectionVersion;
       try {
-        const movie = await movieService.getDetails(payload.data.movieId);
+        const movie = normalizeMovieDetails(await movieService.getDetails(payload.data.movieId));
         const currentRoom = getRoom(code);
         if (!currentRoom || currentRoom !== room || currentRoom.hostId !== socket.id || !currentRoom.participants.has(socket.id)) {
           socket.emit("movie:error", { message: "Only the current host can select a movie for this room." });

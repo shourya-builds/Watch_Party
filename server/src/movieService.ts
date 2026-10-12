@@ -9,7 +9,7 @@ export type MovieSummary = {
   popularity: number;
   genreIds: number[];
 };
-export type MovieDetails = Omit<MovieSummary, "genreIds"> & { genres: MovieGenre[] };
+export type MovieDetails = MovieSummary & { genres: MovieGenre[] };
 export type MovieSearchParams = {
   query: string;
   genreId?: number;
@@ -81,6 +81,7 @@ type TmdbMovie = {
 };
 
 function movieSummary(movie: TmdbMovie): MovieSummary | null {
+  if (!movie || typeof movie !== "object") return null;
   if (!Number.isSafeInteger(movie.id) || !movie.id || typeof movie.title !== "string") return null;
   return {
     id: movie.id,
@@ -94,10 +95,34 @@ function movieSummary(movie: TmdbMovie): MovieSummary | null {
   };
 }
 
+/** Enforces the public movie-details contract, including optional TMDB arrays. */
+export function normalizeMovieDetails(value: unknown): MovieDetails {
+  if (!value || typeof value !== "object") throw new MovieServiceError("The movie service returned invalid movie details.", 502);
+  const raw = value as TmdbMovie & Partial<MovieSummary>;
+  const movie = movieSummary({
+    id: raw.id,
+    title: raw.title,
+    overview: raw.overview,
+    poster_path: raw.poster_path ?? raw.posterPath,
+    release_date: raw.release_date ?? raw.releaseDate,
+    vote_average: raw.vote_average ?? raw.voteAverage,
+    popularity: raw.popularity,
+    genre_ids: raw.genre_ids ?? raw.genreIds,
+  });
+  if (!movie) throw new MovieServiceError("The movie service returned invalid movie details.", 502);
+  const rawGenres = raw.genres;
+  const genres = Array.isArray(rawGenres)
+    ? rawGenres.filter((genre): genre is { id: number; name: string } =>
+      !!genre && Number.isSafeInteger(genre.id) && typeof genre.name === "string")
+      .map(genre => ({ id: genre.id, name: genre.name }))
+    : [];
+  return { ...movie, genres };
+}
+
 export const tmdbMovieService: MovieService = {
   async getGenres() {
     const data = await request<{ genres?: Array<{ id?: number; name?: string }> }>("/genre/movie/list", { language: "en-US" });
-    return (data.genres || []).filter(genre => Number.isSafeInteger(genre.id) && typeof genre.name === "string")
+    return (Array.isArray(data.genres) ? data.genres : []).filter(genre => Number.isSafeInteger(genre.id) && typeof genre.name === "string")
       .map(genre => ({ id: genre.id!, name: genre.name! }));
   },
 
@@ -118,7 +143,7 @@ export const tmdbMovieService: MovieService = {
     }
     const path = isSearch ? "/search/movie" : "/discover/movie";
     const data = await request<{ page?: number; total_pages?: number; total_results?: number; results?: TmdbMovie[] }>(path, query);
-    let results = (data.results || []).map(movieSummary).filter((movie): movie is MovieSummary => movie !== null);
+    let results = (Array.isArray(data.results) ? data.results : []).map(movieSummary).filter((movie): movie is MovieSummary => movie !== null);
     if (isSearch && params.genreId) results = results.filter(movie => movie.genreIds.includes(params.genreId!));
     if (isSearch) {
       const sorter = params.sortBy;
@@ -139,10 +164,6 @@ export const tmdbMovieService: MovieService = {
 
   async getDetails(id) {
     const data = await request<TmdbMovie>(`/movie/${id}`, { language: "en-US" });
-    const summary = movieSummary(data);
-    if (!summary) throw new MovieServiceError("TMDB returned invalid movie details.", 502);
-    const genres = (data.genres || []).filter(genre => Number.isSafeInteger(genre.id) && typeof genre.name === "string")
-      .map(genre => ({ id: genre.id!, name: genre.name! }));
-    return { ...summary, genres };
+    return normalizeMovieDetails(data);
   },
 };

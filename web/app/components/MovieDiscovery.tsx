@@ -14,7 +14,7 @@ export type MovieSummary = {
   popularity: number;
   genreIds: number[];
 };
-export type MovieDetails = Omit<MovieSummary, "genreIds"> & { genreIds: number[]; genres: MovieGenre[] };
+export type MovieDetails = MovieSummary & { genres: MovieGenre[] };
 export type MoviePage = { page: number; totalPages: number; totalResults: number; results: MovieSummary[] };
 
 const API = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:4000";
@@ -44,6 +44,17 @@ async function readApi<T>(url: string, signal?: AbortSignal): Promise<T> {
   return body;
 }
 
+function parseMovieDetails(value: unknown): MovieDetails {
+  if (!value || typeof value !== "object") throw new Error("Movie details returned an invalid response.");
+  const movie = value as Partial<MovieDetails>;
+  if (!Number.isSafeInteger(movie.id) || typeof movie.title !== "string" || !Array.isArray(movie.genreIds) || !Array.isArray(movie.genres)) {
+    throw new Error("Movie details returned an invalid response.");
+  }
+  const genres = movie.genres.filter((genre): genre is MovieGenre =>
+    !!genre && Number.isSafeInteger(genre.id) && typeof genre.name === "string");
+  return { ...movie as MovieDetails, genres };
+}
+
 function Poster({ path, title, className }: { path: string | null; title: string; className: string }) {
   const [failed, setFailed] = useState(false);
   if (!path || failed) return <div className={`${className} grid place-items-center bg-slate-800 px-3 text-center text-xs text-slate-500`}>Poster unavailable</div>;
@@ -61,7 +72,7 @@ export default function MovieDiscovery({ open, isHost, canSelect, selectedMovie,
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [details, setDetails] = useState<MovieDetails | null>(null);
+  const [details, setDetails] = useState<MovieSummary | MovieDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [selectionPending, setSelectionPending] = useState(false);
@@ -114,11 +125,14 @@ export default function MovieDiscovery({ open, isHost, canSelect, selectedMovie,
     detailsRequestRef.current?.abort();
     const controller = new AbortController();
     detailsRequestRef.current = controller;
-    setDetails(movie as MovieDetails);
+    setDetails(movie);
     setDetailsError("");
     setDetailsLoading(true);
-    void readApi<MovieDetails>(`${API}/api/movies/${movie.id}`, controller.signal)
-      .then(setDetails)
+    void readApi<unknown>(`${API}/api/movies/${movie.id}`, controller.signal)
+      .then(value => {
+        const parsed = parseMovieDetails(value);
+        setDetails(parsed);
+      })
       .catch(cause => { if (!controller.signal.aborted) setDetailsError(cause instanceof Error ? cause.message : "Could not load movie details."); })
       .finally(() => { if (!controller.signal.aborted) setDetailsLoading(false); });
   }
@@ -130,7 +144,7 @@ export default function MovieDiscovery({ open, isHost, canSelect, selectedMovie,
   }
 
   function selectMovie() {
-    if (!details || !isHost || !canSelect || selectionPending) return;
+    if (!details || !isHost || !canSelect || selectionPending || detailsLoading) return;
     setSelectionPending(true);
     onSelect(details.id);
   }
@@ -176,7 +190,7 @@ export default function MovieDiscovery({ open, isHost, canSelect, selectedMovie,
           <Poster path={details.posterPath} title={details.title} className="aspect-[2/3] max-h-[55vh] w-full bg-slate-800 object-cover sm:max-h-none" />
           <div className="flex min-w-0 flex-col p-5 sm:p-6"><div className="flex items-start justify-between gap-3"><div><h3 id="movie-detail-title" className="text-xl font-bold">{details.title}</h3><p className="mt-1 text-sm text-slate-400">{details.releaseDate || "Release date unknown"}</p></div><button type="button" aria-label="Close movie details" onClick={closeDetails} className="rounded border border-slate-600 px-2 py-1 text-xs">Close</button></div>
             <p className="mt-4 text-sm leading-relaxed text-slate-300">{details.overview || "No synopsis is available."}</p>
-            <div className="mt-4 flex flex-wrap gap-2">{details.genres.map(genre => <span key={genre.id} className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">{genre.name}</span>)}</div>
+            <div className="mt-4 flex flex-wrap gap-2">{"genres" in details && details.genres.map(genre => <span key={genre.id} className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">{genre.name}</span>)}</div>
             <p className="mt-4 text-sm text-amber-300">★ {details.voteAverage.toFixed(1)} / 10</p>
             {detailsLoading && <p role="status" className="mt-3 text-xs text-slate-400">Loading full details…</p>}
             {detailsError && <p role="alert" className="mt-3 text-sm text-rose-300">{detailsError}</p>}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { io as createClient, type Socket as ClientSocket } from "socket.io-client";
 import { createWatchPartyServer } from "../src/watchPartyServer";
-import type { MovieDetails } from "../src/movieService";
+import { normalizeMovieDetails, type MovieDetails } from "../src/movieService";
 
 const testMovie: MovieDetails = {
   id: 550,
@@ -20,8 +20,9 @@ const server = createWatchPartyServer({
     async getGenres() { return [{ id: 18, name: "Drama" }]; },
     async search(params) { return { page: params.page, totalPages: 0, totalResults: 0, results: [] }; },
     async getDetails(id) {
-      if (id !== testMovie.id) throw new Error("Unexpected test movie id");
-      return testMovie;
+      if (id === testMovie.id) return testMovie;
+      if (id === 551) return { id: 551, title: "Optional arrays", overview: "", posterPath: null, releaseDate: "", voteAverage: 0, popularity: 0 } as unknown as MovieDetails;
+      throw new Error("Unexpected test movie id");
     },
   },
 });
@@ -94,6 +95,20 @@ test("host-authorized playback, late-join state, ordered commands, and room capa
   assert.deepEqual(await guestMovieSelected, testMovie);
   assert.deepEqual((await hostRoomAfterMovieSelection).selectedMovie, testMovie);
   assert.deepEqual((await guestRoomAfterMovieSelection).selectedMovie, testMovie);
+
+  const optionalFieldsSelected = event<MovieDetails>(guest, "movie:selected");
+  const hostOptionalFields = event<{ selectedMovie: MovieDetails | null }>(host, "room:state");
+  host.emit("movie:select", { movieId: 551 });
+  const selectedWithMissingArrays = await optionalFieldsSelected;
+  assert.deepEqual(selectedWithMissingArrays.genreIds, []);
+  assert.deepEqual(selectedWithMissingArrays.genres, []);
+  assert.deepEqual((await hostOptionalFields).selectedMovie, selectedWithMissingArrays);
+
+  assert.deepEqual(normalizeMovieDetails({ ...testMovie, genreIds: undefined, genres: undefined }).genreIds, []);
+  assert.deepEqual(normalizeMovieDetails({ ...testMovie, genres: [{ id: 18 }, null, { id: 99, name: "" }] }).genres, [{ id: 99, name: "" }]);
+  const restoredMovie = event<MovieDetails>(guest, "movie:selected");
+  host.emit("movie:select", { movieId: testMovie.id });
+  await restoredMovie;
 
   const invalidSearchResponse = await fetch(`${serverUrl}/api/movies/search?page=0`);
   assert.equal(invalidSearchResponse.status, 400);
