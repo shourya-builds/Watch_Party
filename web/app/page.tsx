@@ -43,6 +43,7 @@ export default function Home() {
   const [duration, setDuration] = useState(0);
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
   const [mediaReady, setMediaReady] = useState(false);
+  const [mediaBuffering, setMediaBuffering] = useState(false);
   const [mediaError, setMediaError] = useState("");
   const [needsPlaybackGesture, setNeedsPlaybackGesture] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -204,7 +205,7 @@ export default function Home() {
     else video.playbackRate = 1;
   }, []);
 
-  useEffect(() => { applyAuthoritativePlayback(); }, [playback, mediaReady, applyAuthoritativePlayback]);
+  useEffect(() => { applyAuthoritativePlayback(); }, [playback, mediaReady, mediaBuffering, applyAuthoritativePlayback]);
 
   function submit(e: FormEvent, action: "create" | "join") {
     e.preventDefault(); setError("");
@@ -314,8 +315,8 @@ export default function Home() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5"><div><h2 className="font-semibold">{room.selectedOpenFilm ? room.selectedOpenFilm.title : `${MOVIE_TITLE} · demo video`}</h2><a className="text-xs text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-cyan-300" href={room.selectedOpenFilm?.sourceUrl || ATTRIBUTION_URL} target="_blank" rel="noreferrer">{room.selectedOpenFilm ? `${room.selectedOpenFilm.attribution} · ${room.selectedOpenFilm.license}` : "MDN sample video · CC0 1.0"}</a></div><span className="text-xs text-slate-500">{playback?.playing ? "Playing" : "Paused"}{playback ? ` · sync #${playback.sequence}` : ""}</span></div>
 
             <div className="relative aspect-video bg-black lg:min-h-0 lg:flex-1 lg:aspect-auto">
-              <video ref={videoRef} src={room.selectedOpenFilm?.videoUrl || VIDEO_URL} preload="metadata" playsInline className="h-full w-full object-contain" onLoadStart={() => { setMediaReady(false); setMediaError(""); }} onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setMediaReady(true); setMediaError(""); }} onCanPlay={() => { setMediaReady(true); setMediaError(""); }} onWaiting={() => setMediaReady(false)} onPlaying={() => setMediaReady(true)} onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded} onError={() => { setMediaReady(false); setMediaError("This video could not be loaded. Check your connection or try the demo video again."); }} />
-              {!mediaReady && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/55"><div className="flex items-center gap-3 text-sm text-slate-200"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-cyan-300" />Loading video…</div></div>}
+              <video ref={videoRef} src={room.selectedOpenFilm?.videoUrl || VIDEO_URL} preload="metadata" playsInline className="h-full w-full object-contain" onLoadStart={() => { setMediaReady(false); setMediaBuffering(true); setMediaError(""); }} onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setMediaReady(true); setMediaBuffering(true); setMediaError(""); }} onCanPlay={() => { setMediaReady(true); setMediaBuffering(false); setMediaError(""); }} onWaiting={() => setMediaBuffering(true)} onPlaying={() => { setMediaReady(true); setMediaBuffering(false); }} onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded} onError={() => { setMediaReady(false); setMediaBuffering(false); setMediaError("This video could not be loaded. Check your connection or try the demo video again."); }} />
+              {(!mediaReady || mediaBuffering) && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/45"><div className="flex items-center gap-3 text-sm text-slate-200"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-cyan-300" />{mediaReady ? "Buffering video… syncing playback" : "Loading video…"}</div></div>}
               {mediaError && <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-center"><p role="alert" className="max-w-lg text-sm text-rose-200">{mediaError}</p><button type="button" onClick={retryVideo} className="rounded-lg border border-cyan-400 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/10">Retry video</button></div>}
               {needsPlaybackGesture && playback?.playing && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/55"><button onClick={() => { const video = videoRef.current; if (video) void video.play().then(() => setNeedsPlaybackGesture(false)).catch(() => setMediaError("Your browser blocked playback. Check the video source or browser media settings.")); }} className="rounded-xl bg-cyan-400 px-5 py-3 font-semibold text-slate-950">Enable synced playback</button></div>}
               {!connected && <div className="absolute bottom-3 left-3 rounded-md bg-black/75 px-3 py-2 text-xs text-amber-200">Playback controls paused while reconnecting</div>}
