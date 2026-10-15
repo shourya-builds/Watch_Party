@@ -59,6 +59,7 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
     z.object({ action: z.literal("restart") }),
     z.object({ action: z.literal("seek"), position: z.number().finite().min(0).max(86_400) }),
   ]);
+  const playbackBufferingSchema = z.object({ buffering: z.boolean(), position: z.number().finite().min(0).max(86_400) }).strict();
   const emitRoom = (code: string) => { const room = getRoom(code); if (room) io.to(code).emit("room:state", publicRoom(room)); };
   const emitPlayback = (code: string, snapshot?: ReturnType<typeof playbackSnapshot>, restarted = false) => {
     const room = getRoom(code);
@@ -158,6 +159,20 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
       const snapshot = applyPlaybackCommand(room.playback, command.data);
       emitPlayback(code, snapshot, command.data.action === "restart");
     });
+    socket.on("playback:buffering", raw => {
+      const code = socket.data.roomCode as string | undefined; const room = code && getRoom(code);
+      const payload = playbackBufferingSchema.safeParse(raw);
+      if (!room || !room.participants.has(socket.id) || room.hostId !== socket.id || !payload.success) return;
+      const now = Date.now();
+      if (payload.data.buffering) {
+        if (!room.playback.playing || room.playback.buffering) return;
+        room.playback = { ...room.playback, playing: false, position: payload.data.position, serverTimestamp: now, sequence: room.playback.sequence + 1, buffering: true };
+      } else {
+        if (!room.playback.buffering) return;
+        room.playback = { ...room.playback, playing: true, position: payload.data.position, serverTimestamp: now, sequence: room.playback.sequence + 1, buffering: false };
+      }
+      emitPlayback(code, { ...room.playback });
+    });
     socket.on("movie:select", async raw => {
       const code = socket.data.roomCode as string | undefined;
       const room = code && getRoom(code);
@@ -208,7 +223,7 @@ export function createWatchPartyServer(options: { movieService?: MovieService } 
         return;
       }
       room.selectedOpenFilm = film ?? null;
-      room.playback = { playing: false, position: 0, serverTimestamp: Date.now(), sequence: room.playback.sequence + 1 };
+      room.playback = { playing: false, position: 0, serverTimestamp: Date.now(), sequence: room.playback.sequence + 1, buffering: false };
       io.to(code).emit("open-film:selected", film ?? null);
       emitRoom(code);
       emitPlayback(code);

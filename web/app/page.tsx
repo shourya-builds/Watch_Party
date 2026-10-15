@@ -8,7 +8,7 @@ import MovieDiscovery, { type MovieDetails } from "./components/MovieDiscovery";
 type Person = { id: string; name: string; isHost: boolean; connected: boolean };
 type OpenFilm = { id: string; title: string; year: number; videoUrl: string; attribution: string; license: string; licenseUrl: string; sourceUrl: string };
 type Room = { code: string; participants: Person[]; limit: number; selectedMovie: MovieDetails | null; selectedOpenFilm: OpenFilm | null };
-type Playback = { playing: boolean; position: number; serverTimestamp: number; sequence: number; receivedAt: number; restarted?: boolean };
+type Playback = { playing: boolean; position: number; serverTimestamp: number; sequence: number; buffering: boolean; receivedAt: number; restarted?: boolean };
 
 const API = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:4000";
 const VIDEO_URL = process.env.NEXT_PUBLIC_SAMPLE_VIDEO_URL?.trim() || "/samples/flower.mp4";
@@ -56,6 +56,7 @@ export default function Home() {
   const playbackApplyGenerationRef = useRef(0);
   const cancelPlaybackSeekRef = useRef<(() => void) | null>(null);
   const synchronizingRef = useRef(false);
+  const hostBufferingRef = useRef(false);
 
   const retryVideo = useCallback(() => {
     const video = videoRef.current;
@@ -94,6 +95,7 @@ export default function Home() {
     s.on("playback:state", (snapshot: Omit<Playback, "receivedAt">) => {
       const previous = playbackRef.current;
       if (previous && (snapshot.sequence < previous.sequence || (snapshot.sequence === previous.sequence && snapshot.serverTimestamp <= previous.serverTimestamp))) return;
+      hostBufferingRef.current = snapshot.buffering;
       const received = { ...snapshot, receivedAt: performance.now() };
       playbackRef.current = received;
       if (playbackCommandPendingRef.current && (!previous || snapshot.sequence > previous.sequence)) {
@@ -146,6 +148,9 @@ export default function Home() {
     const video = videoRef.current;
     const snapshot = playbackRef.current;
     if (!video || !snapshot || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    // Pause guests during a host stall, but preserve the host's play intent so
+    // the browser can resume naturally when its buffered data becomes ready.
+    if (isHost && (snapshot.buffering || hostBufferingRef.current)) return;
     const elapsed = snapshot.playing ? Math.max(0, performance.now() - snapshot.receivedAt) / 1000 : 0;
     const target = Math.max(0, Math.min(snapshot.position + elapsed, Number.isFinite(video.duration) ? video.duration : snapshot.position + elapsed));
     const drift = target - video.currentTime;
@@ -203,7 +208,7 @@ export default function Home() {
     if (Math.abs(remainingDrift) > DRIFT_SEEK_THRESHOLD) video.playbackRate = 1;
     else if (Math.abs(remainingDrift) > DRIFT_RATE_THRESHOLD) video.playbackRate = remainingDrift > 0 ? 1.05 : 0.95;
     else video.playbackRate = 1;
-  }, []);
+  }, [isHost]);
 
   useEffect(() => { applyAuthoritativePlayback(); }, [playback, mediaReady, mediaBuffering, applyAuthoritativePlayback]);
 
@@ -272,6 +277,14 @@ export default function Home() {
     sendPlaybackCommand({ action: "pause" });
   }
 
+  function reportHostBuffering(buffering: boolean) {
+    if (!isHost || !connected || !socket || !videoRef.current) return;
+    if (buffering === hostBufferingRef.current) return;
+    if (buffering && !playbackRef.current?.playing) return;
+    hostBufferingRef.current = buffering;
+    socket.emit("playback:buffering", { buffering, position: videoRef.current.currentTime });
+  }
+
   async function copyInvite() {
     if (!room) return;
     try {
@@ -312,10 +325,10 @@ export default function Home() {
 
         <div className="grid items-start gap-5 lg:min-h-0 lg:flex-1 lg:items-stretch lg:grid-cols-[minmax(0,1fr)_310px] lg:grid-rows-1">
           <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl shadow-black/30 lg:flex lg:min-h-0 lg:flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5"><div><h2 className="font-semibold">{room.selectedOpenFilm ? room.selectedOpenFilm.title : `${MOVIE_TITLE} · demo video`}</h2><a className="text-xs text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-cyan-300" href={room.selectedOpenFilm?.sourceUrl || ATTRIBUTION_URL} target="_blank" rel="noreferrer">{room.selectedOpenFilm ? `${room.selectedOpenFilm.attribution} · ${room.selectedOpenFilm.license}` : "MDN sample video · CC0 1.0"}</a></div><span className="text-xs text-slate-500">{playback?.playing ? "Playing" : "Paused"}{playback ? ` · sync #${playback.sequence}` : ""}</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5"><div><h2 className="font-semibold">{room.selectedOpenFilm ? room.selectedOpenFilm.title : `${MOVIE_TITLE} · demo video`}</h2><a className="text-xs text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-cyan-300" href={room.selectedOpenFilm?.sourceUrl || ATTRIBUTION_URL} target="_blank" rel="noreferrer">{room.selectedOpenFilm ? `${room.selectedOpenFilm.attribution} · ${room.selectedOpenFilm.license}` : "MDN sample video · CC0 1.0"}</a></div><span className="text-xs text-slate-500">{playback?.buffering ? "Host buffering" : playback?.playing ? "Playing" : "Paused"}{playback ? ` · sync #${playback.sequence}` : ""}</span></div>
 
             <div className="relative aspect-video bg-black lg:min-h-0 lg:flex-1 lg:aspect-auto">
-              <video ref={videoRef} src={room.selectedOpenFilm?.videoUrl || VIDEO_URL} preload="metadata" playsInline className="h-full w-full object-contain" onLoadStart={() => { setMediaReady(false); setMediaBuffering(true); setMediaError(""); }} onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setMediaReady(true); setMediaBuffering(true); setMediaError(""); }} onCanPlay={() => { setMediaReady(true); setMediaBuffering(false); setMediaError(""); }} onWaiting={() => setMediaBuffering(true)} onPlaying={() => { setMediaReady(true); setMediaBuffering(false); }} onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded} onError={() => { setMediaReady(false); setMediaBuffering(false); setMediaError("This video could not be loaded. Check your connection or try the demo video again."); }} />
+              <video ref={videoRef} src={room.selectedOpenFilm?.videoUrl || VIDEO_URL} preload="metadata" playsInline className="h-full w-full object-contain" onLoadStart={() => { setMediaReady(false); setMediaBuffering(true); setMediaError(""); }} onLoadedMetadata={event => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); setMediaReady(true); setMediaBuffering(true); setMediaError(""); }} onCanPlay={() => { setMediaReady(true); setMediaBuffering(false); setMediaError(""); }} onWaiting={() => { setMediaBuffering(true); reportHostBuffering(true); }} onPlaying={() => { setMediaReady(true); setMediaBuffering(false); reportHostBuffering(false); }} onTimeUpdate={handleTimeUpdate} onEnded={handleVideoEnded} onError={() => { setMediaReady(false); setMediaBuffering(false); setMediaError("This video could not be loaded. Check your connection or try the demo video again."); }} />
               {(!mediaReady || mediaBuffering) && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/45"><div className="flex items-center gap-3 text-sm text-slate-200"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-cyan-300" />{mediaReady ? "Buffering video… syncing playback" : "Loading video…"}</div></div>}
               {mediaError && <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-center"><p role="alert" className="max-w-lg text-sm text-rose-200">{mediaError}</p><button type="button" onClick={retryVideo} className="rounded-lg border border-cyan-400 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/10">Retry video</button></div>}
               {needsPlaybackGesture && playback?.playing && !mediaError && <div className="absolute inset-0 flex items-center justify-center bg-black/55"><button onClick={() => { const video = videoRef.current; if (video) void video.play().then(() => setNeedsPlaybackGesture(false)).catch(() => setMediaError("Your browser blocked playback. Check the video source or browser media settings.")); }} className="rounded-xl bg-cyan-400 px-5 py-3 font-semibold text-slate-950">Enable synced playback</button></div>}

@@ -18,6 +18,7 @@ export function applyPlaybackCommand(state: PlaybackState, command: PlaybackComm
     position: command.action === "restart" ? 0 : command.action === "seek" ? command.position : current.position,
     serverTimestamp: now,
     sequence: state.sequence + 1,
+    buffering: false,
   };
   Object.assign(state, next);
   return { ...next };

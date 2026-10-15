@@ -168,6 +168,26 @@ test("host-authorized playback, late-join state, ordered commands, and room capa
     assert.equal(restartState.restarted, true);
   }
 
+  const hostBuffering = event<{ playing: boolean; buffering: boolean; position: number; sequence: number }>(host, "playback:state");
+  const guestBuffering = event<{ playing: boolean; buffering: boolean; position: number; sequence: number }>(guest, "playback:state");
+  host.emit("playback:buffering", { buffering: true, position: 18 });
+  for (const state of [await hostBuffering, await guestBuffering]) {
+    assert.equal(state.playing, false);
+    assert.equal(state.buffering, true);
+    assert.equal(state.position, 18);
+    assert.equal(state.sequence, 5);
+  }
+
+  const hostResumed = event<{ playing: boolean; buffering: boolean; position: number; sequence: number }>(host, "playback:state");
+  const guestResumed = event<{ playing: boolean; buffering: boolean; position: number; sequence: number }>(guest, "playback:state");
+  host.emit("playback:buffering", { buffering: false, position: 19.5 });
+  for (const state of [await hostResumed, await guestResumed]) {
+    assert.equal(state.playing, true);
+    assert.equal(state.buffering, false);
+    assert.equal(state.position, 19.5);
+    assert.equal(state.sequence, 6);
+  }
+
   const recoveredDisconnect = event<string>(host, "disconnect");
   host.io.engine.close();
   await recoveredDisconnect;
@@ -180,7 +200,7 @@ test("host-authorized playback, late-join state, ordered commands, and room capa
   assert.equal((await recoveredRoom).code, room.code);
   const recoveredState = await recoveredPlayback;
   assert.equal(recoveredState.playing, true);
-  assert.equal(recoveredState.sequence, 4);
+  assert.equal(recoveredState.sequence, 6);
   assert.ok(recoveredState.position >= 0);
 
   const transferred = event<{ participants: Array<{ id: string; isHost: boolean }> }>(guest, "room:state");
@@ -219,7 +239,7 @@ test("host-authorized playback, late-join state, ordered commands, and room capa
   const pausedAtNewFilm = await playbackResetByFilm;
   assert.equal(pausedAtNewFilm.playing, false);
   assert.equal(pausedAtNewFilm.position, 0);
-  assert.equal(pausedAtNewFilm.sequence, 5);
+  assert.equal(pausedAtNewFilm.sequence, 7);
 
   const lateFilmViewer = await connectClient();
   const lateFilmViewerJoined = event<{ selectedOpenFilm: { id: string } | null }>(lateFilmViewer, "room:joined");
